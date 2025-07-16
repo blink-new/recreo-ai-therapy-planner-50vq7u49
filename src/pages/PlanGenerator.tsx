@@ -132,7 +132,8 @@ Please provide a detailed therapy plan with specific activities, objectives, and
     try {
       const user = await blink.auth.me()
       
-      await blink.db.therapyPlans.create({
+      const planData = {
+        id: `plan_${Date.now()}`,
         userId: user.id,
         patientName: formData.patientName,
         patientAge: parseInt(formData.age),
@@ -141,27 +142,55 @@ Please provide a detailed therapy plan with specific activities, objectives, and
         planData: JSON.stringify(generatedPlan),
         status: 'active',
         createdAt: new Date().toISOString()
-      })
+      }
 
-      // Also save patient profile if it doesn't exist
-      const existingPatients = await blink.db.patients.list({
-        where: { 
-          userId: user.id,
-          name: formData.patientName 
-        }
-      })
+      const patientData = {
+        id: `patient_${Date.now()}`,
+        userId: user.id,
+        name: formData.patientName,
+        age: parseInt(formData.age),
+        diagnosis: formData.diagnosis,
+        functionalLevel: formData.functionalLevel,
+        interests: formData.interests,
+        limitations: formData.limitations,
+        createdAt: new Date().toISOString()
+      }
 
-      if (existingPatients.length === 0) {
-        await blink.db.patients.create({
-          userId: user.id,
-          name: formData.patientName,
-          age: parseInt(formData.age),
-          diagnosis: formData.diagnosis,
-          functionalLevel: formData.functionalLevel,
-          interests: formData.interests,
-          limitations: formData.limitations,
-          createdAt: new Date().toISOString()
+      try {
+        // Try to save to database first
+        await blink.db.therapyPlans.create(planData)
+
+        // Also save patient profile if it doesn't exist
+        const existingPatients = await blink.db.patients.list({
+          where: { 
+            userId: user.id,
+            name: formData.patientName 
+          }
         })
+
+        if (existingPatients.length === 0) {
+          await blink.db.patients.create(patientData)
+        }
+      } catch (dbError) {
+        console.log('Database not available, saving to localStorage')
+        
+        // Fallback to localStorage
+        const savedPlans = localStorage.getItem(`therapy_plans_${user.id}`)
+        const savedPatients = localStorage.getItem(`patients_${user.id}`)
+        
+        let plans = savedPlans ? JSON.parse(savedPlans) : []
+        let patients = savedPatients ? JSON.parse(savedPatients) : []
+        
+        // Add new plan
+        plans.unshift(planData)
+        localStorage.setItem(`therapy_plans_${user.id}`, JSON.stringify(plans))
+        
+        // Add patient if doesn't exist
+        const existingPatient = patients.find((p: any) => p.name === formData.patientName)
+        if (!existingPatient) {
+          patients.push(patientData)
+          localStorage.setItem(`patients_${user.id}`, JSON.stringify(patients))
+        }
       }
 
       alert('Plan saved successfully!')

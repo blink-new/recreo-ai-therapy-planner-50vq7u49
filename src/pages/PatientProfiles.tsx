@@ -78,35 +78,52 @@ export function PatientProfiles() {
   const loadPatients = async () => {
     try {
       const user = await blink.auth.me()
-      const patientsData = await blink.db.patients.list({
-        where: { userId: user.id },
-        orderBy: { createdAt: 'desc' }
-      })
+      
+      let patientsData = []
+      let plansData = []
+      
+      try {
+        // Try to load from database first
+        patientsData = await blink.db.patients.list({
+          where: { userId: user.id },
+          orderBy: { createdAt: 'desc' }
+        })
+        
+        plansData = await blink.db.therapyPlans.list({
+          where: { userId: user.id }
+        })
+      } catch (dbError) {
+        console.log('Database not available, using local storage fallback')
+        
+        // Fallback to localStorage
+        const savedPatients = localStorage.getItem(`patients_${user.id}`)
+        const savedPlans = localStorage.getItem(`therapy_plans_${user.id}`)
+        
+        if (savedPatients) {
+          patientsData = JSON.parse(savedPatients)
+        }
+        if (savedPlans) {
+          plansData = JSON.parse(savedPlans)
+        }
+      }
 
       // Get plan counts for each patient
-      const patientsWithPlans = await Promise.all(
-        patientsData.map(async (patient: any) => {
-          const plans = await blink.db.therapyPlans.list({
-            where: { 
-              userId: user.id,
-              patientName: patient.name 
-            }
-          })
-          
-          const activePlans = plans.filter((plan: any) => plan.status === 'active').length
-          const lastPlan = plans.length > 0 ? plans[0] : null
-          
-          return {
-            ...patient,
-            activePlans,
-            lastPlanDate: lastPlan?.createdAt
-          }
-        })
-      )
+      const patientsWithPlans = patientsData.map((patient: any) => {
+        const patientPlans = plansData.filter((plan: any) => plan.patientName === patient.name)
+        const activePlans = patientPlans.filter((plan: any) => plan.status === 'active').length
+        const lastPlan = patientPlans.length > 0 ? patientPlans[0] : null
+        
+        return {
+          ...patient,
+          activePlans,
+          lastPlanDate: lastPlan?.createdAt
+        }
+      })
 
       setPatients(patientsWithPlans)
     } catch (error) {
       console.error('Error loading patients:', error)
+      setPatients([])
     }
   }
 
@@ -114,7 +131,8 @@ export function PatientProfiles() {
     try {
       const user = await blink.auth.me()
       
-      await blink.db.patients.create({
+      const patientData = {
+        id: `patient_${Date.now()}`,
         userId: user.id,
         name: newPatient.name,
         age: parseInt(newPatient.age),
@@ -123,7 +141,21 @@ export function PatientProfiles() {
         interests: newPatient.interests,
         limitations: newPatient.limitations,
         createdAt: new Date().toISOString()
-      })
+      }
+      
+      try {
+        // Try to save to database first
+        await blink.db.patients.create(patientData)
+      } catch (dbError) {
+        console.log('Database not available, saving to localStorage')
+        
+        // Fallback to localStorage
+        const savedPatients = localStorage.getItem(`patients_${user.id}`)
+        let patients = savedPatients ? JSON.parse(savedPatients) : []
+        
+        patients.push(patientData)
+        localStorage.setItem(`patients_${user.id}`, JSON.stringify(patients))
+      }
 
       setNewPatient({
         name: '',
@@ -144,14 +176,35 @@ export function PatientProfiles() {
     if (!editingPatient) return
     
     try {
-      await blink.db.patients.update(editingPatient.id, {
+      const user = await blink.auth.me()
+      
+      const updatedData = {
         name: newPatient.name,
         age: parseInt(newPatient.age),
         diagnosis: newPatient.diagnosis,
         functionalLevel: newPatient.functionalLevel,
         interests: newPatient.interests,
         limitations: newPatient.limitations
-      })
+      }
+      
+      try {
+        // Try to update in database first
+        await blink.db.patients.update(editingPatient.id, updatedData)
+      } catch (dbError) {
+        console.log('Database not available, updating in localStorage')
+        
+        // Fallback to localStorage
+        const savedPatients = localStorage.getItem(`patients_${user.id}`)
+        if (savedPatients) {
+          let patients = JSON.parse(savedPatients)
+          const patientIndex = patients.findIndex((p: any) => p.id === editingPatient.id)
+          
+          if (patientIndex !== -1) {
+            patients[patientIndex] = { ...patients[patientIndex], ...updatedData }
+            localStorage.setItem(`patients_${user.id}`, JSON.stringify(patients))
+          }
+        }
+      }
 
       setEditingPatient(null)
       setNewPatient({
@@ -174,7 +227,23 @@ export function PatientProfiles() {
     }
 
     try {
-      await blink.db.patients.delete(patientId)
+      const user = await blink.auth.me()
+      
+      try {
+        // Try to delete from database first
+        await blink.db.patients.delete(patientId)
+      } catch (dbError) {
+        console.log('Database not available, deleting from localStorage')
+        
+        // Fallback to localStorage
+        const savedPatients = localStorage.getItem(`patients_${user.id}`)
+        if (savedPatients) {
+          let patients = JSON.parse(savedPatients)
+          patients = patients.filter((p: any) => p.id !== patientId)
+          localStorage.setItem(`patients_${user.id}`, JSON.stringify(patients))
+        }
+      }
+      
       loadPatients()
     } catch (error) {
       console.error('Error deleting patient:', error)

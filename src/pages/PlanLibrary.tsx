@@ -82,13 +82,31 @@ export function PlanLibrary() {
   const loadPlans = async () => {
     try {
       const user = await blink.auth.me()
-      const plansData = await blink.db.therapyPlans.list({
-        where: { userId: user.id },
-        orderBy: { createdAt: 'desc' }
-      })
+      
+      let plansData = []
+      
+      try {
+        // Try to load from database first
+        plansData = await blink.db.therapyPlans.list({
+          where: { userId: user.id },
+          orderBy: { createdAt: 'desc' }
+        })
+      } catch (dbError) {
+        console.log('Database not available, using local storage fallback')
+        
+        // Fallback to localStorage
+        const savedPlans = localStorage.getItem(`therapy_plans_${user.id}`)
+        if (savedPlans) {
+          plansData = JSON.parse(savedPlans)
+          // Sort by createdAt desc
+          plansData.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        }
+      }
+      
       setPlans(plansData)
     } catch (error) {
       console.error('Error loading plans:', error)
+      setPlans([])
     }
   }
 
@@ -103,7 +121,23 @@ export function PlanLibrary() {
     }
 
     try {
-      await blink.db.therapyPlans.delete(planId)
+      const user = await blink.auth.me()
+      
+      try {
+        // Try to delete from database first
+        await blink.db.therapyPlans.delete(planId)
+      } catch (dbError) {
+        console.log('Database not available, deleting from localStorage')
+        
+        // Fallback to localStorage
+        const savedPlans = localStorage.getItem(`therapy_plans_${user.id}`)
+        if (savedPlans) {
+          let plans = JSON.parse(savedPlans)
+          plans = plans.filter((p: any) => p.id !== planId)
+          localStorage.setItem(`therapy_plans_${user.id}`, JSON.stringify(plans))
+        }
+      }
+      
       loadPlans()
     } catch (error) {
       console.error('Error deleting plan:', error)
@@ -114,7 +148,8 @@ export function PlanLibrary() {
     try {
       const user = await blink.auth.me()
       
-      await blink.db.therapyPlans.create({
+      const duplicatedPlan = {
+        id: `plan_${Date.now()}`,
         userId: user.id,
         patientName: `${plan.patientName} (Copy)`,
         patientAge: plan.patientAge,
@@ -123,7 +158,21 @@ export function PlanLibrary() {
         planData: plan.planData,
         status: 'draft',
         createdAt: new Date().toISOString()
-      })
+      }
+      
+      try {
+        // Try to save to database first
+        await blink.db.therapyPlans.create(duplicatedPlan)
+      } catch (dbError) {
+        console.log('Database not available, saving to localStorage')
+        
+        // Fallback to localStorage
+        const savedPlans = localStorage.getItem(`therapy_plans_${user.id}`)
+        let plans = savedPlans ? JSON.parse(savedPlans) : []
+        
+        plans.unshift(duplicatedPlan)
+        localStorage.setItem(`therapy_plans_${user.id}`, JSON.stringify(plans))
+      }
 
       loadPlans()
       alert('Plan duplicated successfully!')

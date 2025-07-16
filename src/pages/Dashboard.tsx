@@ -35,22 +35,41 @@ export function Dashboard({ onTabChange }: DashboardProps) {
     try {
       const user = await blink.auth.me()
       
-      // Load recent therapy plans
-      const plans = await blink.db.therapyPlans.list({
-        where: { userId: user.id },
-        orderBy: { createdAt: 'desc' },
-        limit: 5
-      })
+      // Try to load data from localStorage as fallback
+      const savedPlans = localStorage.getItem(`therapy_plans_${user.id}`)
+      const savedPatients = localStorage.getItem(`patients_${user.id}`)
+      
+      let plans = []
+      let patients = []
+      
+      try {
+        // Try to load from database first
+        plans = await blink.db.therapyPlans.list({
+          where: { userId: user.id },
+          orderBy: { createdAt: 'desc' },
+          limit: 5
+        })
+        
+        patients = await blink.db.patients.list({
+          where: { userId: user.id }
+        })
+      } catch (dbError) {
+        console.log('Database not available, using local storage fallback')
+        
+        // Fallback to localStorage
+        if (savedPlans) {
+          plans = JSON.parse(savedPlans)
+        }
+        if (savedPatients) {
+          patients = JSON.parse(savedPatients)
+        }
+      }
+      
       setRecentPlans(plans)
 
-      // Load patients
-      const patients = await blink.db.patients.list({
-        where: { userId: user.id }
-      })
-
       // Calculate stats
-      const activePlans = plans.filter(plan => plan.status === 'active').length
-      const thisWeekPlans = plans.filter(plan => {
+      const activePlans = plans.filter((plan: any) => plan.status === 'active').length
+      const thisWeekPlans = plans.filter((plan: any) => {
         const planDate = new Date(plan.createdAt)
         const weekAgo = new Date()
         weekAgo.setDate(weekAgo.getDate() - 7)
@@ -65,6 +84,14 @@ export function Dashboard({ onTabChange }: DashboardProps) {
       })
     } catch (error) {
       console.error('Error loading dashboard data:', error)
+      // Set default empty state
+      setRecentPlans([])
+      setStats({
+        totalPatients: 0,
+        activePlans: 0,
+        completedSessions: 0,
+        thisWeekPlans: 0
+      })
     }
   }
 
