@@ -6,7 +6,8 @@ import {
   TrendingUp,
   Plus,
   Calendar,
-  Activity
+  Activity,
+  Sparkles
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
